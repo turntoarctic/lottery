@@ -8,44 +8,38 @@
  * 中奖弹窗：手动关闭，根据规则决定是否移除人员
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  Settings,
-  RefreshCw,
-  Trophy,
-  Gift,
-  Zap,
-  Crown,
-  X,
-  Loader2,
-  BarChart3,
-  Volume2,
-  VolumeX,
-  Info,
-} from "lucide-react";
-import Link from "next/link";
-import { ThreeDrawAnimation } from "./three-draw-animation";
-import type { Prize, User, DrawRecord, Rule, Theme } from "@/app/types";
+import { Card } from "@/components/ui/card";
+import { Trophy, Zap, Loader2 } from "lucide-react";
+import dynamic from "next/dynamic";
+import { ThreeErrorBoundary } from "./3d-error-boundary";
+import { PrizeListSidebar } from "./prize-list-sidebar";
+import { StatsDialog } from "./stats-dialog";
+import { WinnersDialog } from "./winners-dialog";
+import { ConfirmDrawDialog } from "./confirm-draw-dialog";
+import { FloatingButtons } from "./floating-buttons";
+import { KeyboardHelpDialog } from "./keyboard-help-dialog";
+import type { Prize, User, Rule, Theme, DrawRecord } from "@/app/types";
 import { PRIZE_LEVEL_CONFIG } from "@/app/types";
 import { toast } from "sonner";
+
+// 懒加载 3D 组件 - 使用修复版
+const ThreeDrawAnimation = dynamic(
+  () => import("./three-draw-animation-fixed").then((mod) => ({ default: mod.ThreeDrawAnimationFixed })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-slate-900 via-purple-900 to-pink-900">
+        <div className="text-center">
+          <Loader2 className="h-20 w-20 animate-spin text-yellow-400 mx-auto mb-8 drop-shadow-[0_0_30px_rgba(250,204,21,1)]" />
+          <p className="text-2xl text-purple-200">正在加载 3D 场景...</p>
+          <p className="text-sm text-purple-400 mt-2">首次加载可能需要几秒钟</p>
+        </div>
+      </div>
+    ),
+  }
+);
 
 export function DrawScreen() {
   const [prizes, setPrizes] = useState<Prize[]>([]);
@@ -65,7 +59,6 @@ export function DrawScreen() {
   const [showStats, setShowStats] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -202,7 +195,7 @@ export function DrawScreen() {
     rule,
   ]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
       const [prizesRes, usersRes, recordsRes] = await Promise.all([
@@ -222,7 +215,7 @@ export function DrawScreen() {
       // 按奖品分组中奖记录
       const winnersMap: Record<string, string[]> = {};
       const records = recordsData.data || [];
-      records.forEach((record: DrawRecord) => {
+      records.forEach((record: { prizeId: string; userName: string }) => {
         if (!winnersMap[record.prizeId]) {
           winnersMap[record.prizeId] = [];
         }
@@ -231,26 +224,31 @@ export function DrawScreen() {
       setPrizeWinners(winnersMap);
 
       // 如果之前有选中的奖品，更新它以获取最新的剩余数量
-      if (selectedPrize) {
-        const updatedPrize = loadedPrizes.find(
-          (p: Prize) => p.id === selectedPrize.id,
-        );
-        if (updatedPrize) {
-          setSelectedPrize(updatedPrize);
+      setSelectedPrize((prevSelected) => {
+        if (prevSelected) {
+          const updatedPrize = loadedPrizes.find(
+            (p: Prize) => p.id === prevSelected.id,
+          );
+          return updatedPrize || prevSelected;
+        } else if (loadedPrizes.length > 0) {
+          // 如果没有选中奖品，选择第一个可用的
+          const firstAvailable =
+            loadedPrizes.find((p: Prize) => p.remainingCount > 0) ||
+            loadedPrizes[0];
+          return firstAvailable;
         }
-      } else if (loadedPrizes.length > 0) {
-        // 如果没有选中奖品，选择第一个可用的
-        const firstAvailable =
-          loadedPrizes.find((p: Prize) => p.remainingCount > 0) ||
-          loadedPrizes[0];
-        setSelectedPrize(firstAvailable);
-      }
+        return null;
+      });
     } catch (error) {
       console.error("加载数据失败:", error);
+      toast.error("加载数据失败", {
+        description: "请检查网络连接后重试",
+        duration: 5000,
+      });
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   const loadRule = async () => {
     try {
@@ -375,10 +373,10 @@ export function DrawScreen() {
   };
 
   // 球体展示：始终显示所有人员
-  const allNames = users.map((u) => u.name);
+  const allNames = useMemo(() => users.map((u) => u.name), [users]);
 
   // 抽奖候选人名单：根据规则决定谁可以中奖
-  const eligibleNames = (() => {
+  const eligibleNames = useMemo(() => {
     if (rule && rule.allowRepeatWin) {
       // 允许重复中奖：返回所有人员
       return users.map((u) => u.name);
@@ -386,7 +384,7 @@ export function DrawScreen() {
       // 不允许重复中奖：只返回未中奖人员
       return users.filter((u) => !u.hasWon).map((u) => u.name);
     }
-  })();
+  }, [users, rule]);
 
   return (
     <div
@@ -430,305 +428,32 @@ export function DrawScreen() {
       )}
 
       {/* 统计面板 */}
-      <Dialog open={showStats} onOpenChange={setShowStats}>
-        <DialogContent className="max-w-2xl bg-gradient-to-br from-purple-900/95 via-pink-900/95 to-orange-900/95 backdrop-blur-2xl border-4 border-yellow-400/50 shadow-2xl shadow-yellow-400/30 text-white">
-          <DialogHeader>
-            <DialogTitle className="text-3xl font-bold flex items-center gap-3 text-yellow-400 drop-shadow-[0_0_25px_rgba(250,204,21,1)]">
-              <BarChart3 className="h-10 w-10 animate-bounce" />
-              抽奖统计
-            </DialogTitle>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 mt-6">
-            <Card className="bg-gradient-to-br from-yellow-500/20 to-orange-600/20 backdrop-blur-xl border-2 border-yellow-400/60 p-6 text-center">
-              <div className="text-5xl font-bold text-yellow-400 mb-2 drop-shadow-lg">
-                {users.length}
-              </div>
-              <div className="text-lg text-yellow-200">总人数</div>
-            </Card>
-            <Card className="bg-gradient-to-br from-purple-500/20 to-pink-600/20 backdrop-blur-xl border-2 border-purple-400/60 p-6 text-center">
-              <div className="text-5xl font-bold text-purple-400 mb-2 drop-shadow-lg">
-                {users.filter((u) => u.hasWon).length}
-              </div>
-              <div className="text-lg text-purple-200">已中奖人数</div>
-            </Card>
-            <Card className="bg-gradient-to-br from-pink-500/20 to-rose-600/20 backdrop-blur-xl border-2 border-pink-400/60 p-6 text-center">
-              <div className="text-5xl font-bold text-pink-400 mb-2 drop-shadow-lg">
-                {users.filter((u) => !u.hasWon).length}
-              </div>
-              <div className="text-lg text-pink-200">待抽奖人数</div>
-            </Card>
-            <Card className="bg-gradient-to-br from-blue-500/20 to-cyan-600/20 backdrop-blur-xl border-2 border-blue-400/60 p-6 text-center">
-              <div className="text-5xl font-bold text-blue-400 mb-2 drop-shadow-lg">
-                {prizes.reduce((sum, p) => sum + p.remainingCount, 0)}
-              </div>
-              <div className="text-lg text-blue-200">剩余奖品数</div>
-            </Card>
-            <Card className="col-span-2 bg-gradient-to-br from-green-500/20 to-emerald-600/20 backdrop-blur-xl border-2 border-green-400/60 p-6 text-center">
-              <div className="text-5xl font-bold text-green-400 mb-2 drop-shadow-lg">
-                {prizes.reduce(
-                  (sum, p) => sum + (p.totalCount - p.remainingCount),
-                  0,
-                )}
-              </div>
-              <div className="text-lg text-green-200">已发放奖品总数</div>
-            </Card>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <StatsDialog
+        open={showStats}
+        onOpenChange={setShowStats}
+        users={users}
+        prizes={prizes}
+      />
 
       {/* 浮动管理按钮 - 右上角 */}
-      <div className="fixed top-6 right-6 z-50 flex flex-col gap-3">
-        {/* 统计面板按钮 */}
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setShowStats(!showStats)}
-          className="h-14 w-14 rounded-full shadow-2xl backdrop-blur-xl border-3 border-white/40 hover:scale-110 hover:shadow-lg transition-all duration-300 relative group"
-          style={{
-            background: `linear-gradient(to bottom right, ${theme?.primaryColor || "#A855F7"}CC, ${theme?.secondaryColor || "#EC4899"}CC)`,
-            boxShadow: `0 25px 50px -12px ${theme?.primaryColor || "#A855F7"}80`,
-          }}
-        >
-          <BarChart3 className="h-7 w-7 text-white drop-shadow-lg" />
-          <span className="absolute right-full mr-4 px-3 py-2 bg-black/90 text-white text-sm rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-            统计面板
-          </span>
-        </Button>
-
-        {/* 音效开关按钮 */}
-        {/* <Button
-          variant="outline"
-          size="icon"
-          onClick={() => setSoundEnabled(!soundEnabled)}
-          className="h-14 w-14 rounded-full shadow-2xl backdrop-blur-xl border-3 border-white/40 hover:scale-110 hover:shadow-lg transition-all duration-300 relative group"
-          style={{
-            background: `linear-gradient(to bottom right, ${theme?.primaryColor || "#A855F7"}CC, ${theme?.secondaryColor || "#EC4899"}CC)`,
-            boxShadow: `0 25px 50px -12px ${theme?.primaryColor || "#A855F7"}80`,
-          }}
-        >
-          {soundEnabled ? (
-            <Volume2 className="h-7 w-7 text-white drop-shadow-lg" />
-          ) : (
-            <VolumeX className="h-7 w-7 text-white drop-shadow-lg" />
-          )}
-          <span className="absolute right-full mr-4 px-3 py-2 bg-black/90 text-white text-sm rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-            {soundEnabled ? "关闭音效" : "开启音效"}
-          </span>
-        </Button> */}
-
-        {/* 管理后台按钮 */}
-        <Link href="/admin" className="group">
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-14 w-14 rounded-full shadow-2xl backdrop-blur-xl border-3 border-white/40 hover:scale-110 hover:shadow-lg  relative"
-            style={{
-              background: `linear-gradient(to bottom right, ${theme?.primaryColor || "#A855F7"}CC, ${theme?.secondaryColor || "#EC4899"}CC)`,
-              boxShadow: `0 25px 50px -12px ${theme?.primaryColor || "#A855F7"}80`,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = `linear-gradient(to bottom right, ${theme?.primaryColor || "#A855F7"}, ${theme?.secondaryColor || "#EC4899"})`;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = `linear-gradient(to bottom right, ${theme?.primaryColor || "#A855F7"}CC, ${theme?.secondaryColor || "#EC4899"}CC)`;
-            }}
-          >
-            <Settings className="h-8 w-8 text-white drop-shadow-lg" />
-            <span className="absolute right-full mr-4 px-3 py-2 bg-black/90 text-white text-sm rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
-              管理后台
-            </span>
-          </Button>
-        </Link>
-      </div>
+      <FloatingButtons
+        theme={theme}
+        soundEnabled={soundEnabled}
+        onToggleStats={() => setShowStats(!showStats)}
+        onToggleSound={() => setSoundEnabled(!soundEnabled)}
+      />
 
       <div className="relative z-10 h-screen flex">
         {/* 左侧：奖品列表（固定宽度） */}
-        <div className="w-80 flex-shrink-0 flex flex-col border-r border-white/10 bg-black/20 backdrop-blur-xl">
-          <div className="p-6 border-b border-white/10 flex items-center gap-2">
-            <h2 className="text-3xl font-bold flex items-center gap-3 bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent mb-2">
-              <Gift className="h-8 w-8 text-yellow-400 drop-shadow-[0_0_15px_rgba(250,204,21,1)]" />
-              奖品列表
-            </h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={loadData}
-              className="  gap-2 cursor-pointer "
-            >
-              <RefreshCw className="h-4 w-4" />
-              {/* 刷新列表 */}
-            </Button>
-            {/* {rule && (
-              <div className="mt-3 text-xs text-purple-300 text-center">
-                {rule.allowRepeatWin ? '允许重复中奖' : '不允许重复中奖'}
-              </div>
-            )} */}
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar gap-2">
-            {prizes.map((prize, index) => {
-              const config = PRIZE_LEVEL_CONFIG[prize.level];
-              const isSelected = selectedPrize?.id === prize.id;
-              const isFinished = prize.remainingCount === 0;
-              const progress =
-                prize.totalCount > 0
-                  ? ((prize.totalCount - prize.remainingCount) /
-                      prize.totalCount) *
-                    100
-                  : 0;
-
-              return (
-                <Card
-                  key={prize.id}
-                  className={`
-                    cursor-pointer transition-all duration-500 backdrop-blur-xl border-2 relative overflow-hidden group
-                    ${
-                      isSelected
-                        ? "bg-gradient-to-br from-white/30 to-white/10 border-yellow-400 shadow-2xl shadow-yellow-400/30 scale-105"
-                        : "bg-gradient-to-br from-white/10 to-white/5 border-white/20 hover:bg-white/15 hover:scale-102"
-                    }
-                    ${isFinished ? "opacity-40 grayscale" : ""}
-                  `}
-                  onClick={() => !isDrawing && handleSelectPrize(prize)}
-                >
-                  <CardContent className="p-4 relative flex flex-col items-center">
-                    {prize.imageUrl && (
-                      <div
-                        className="relative h-32 w-full -mx-4 -mt-4 mb-3 cursor-pointer group"
-                      >
-                        <img
-                          src={prize.imageUrl}
-                          alt={prize.name}
-                          className="w-full rounded-b-sm h-full object-cover transition-transform duration-300 group-hover:scale-110"
-                        />
-                        {/* <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
-                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                          <div className="bg-black/70 text-white px-3 py-1 rounded-full text-sm">
-                            点击放大
-                          </div>
-                        </div> */}
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between mb-3 w-full ">
-                      <Badge
-                        style={{
-                          backgroundColor: config.color,
-                          boxShadow: `0 0 15px ${config.color}`,
-                        }}
-                        className="text-sm font-bold border-2 border-white/30 px-3 py-1"
-                      >
-                        {config.label}
-                      </Badge>
-                      {isFinished ? (
-                        <Badge className="text-xs bg-gray-600 border-2 border-white/20">
-                          已抽完
-                        </Badge>
-                      ) : (
-                        isSelected && (
-                          <Crown className="h-6 w-6 text-yellow-400 animate-bounce drop-shadow-[0_0_15px_rgba(250,204,21,1)]" />
-                        )
-                      )}
-                    </div>
-
-                    <div className="flex w-full justify-between items-center">
-                      <div className="font-bold text-xl mb-3 drop-shadow-lg text-white">
-                        {prize.name}
-                      </div>
-
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-purple-200">剩余</span>
-                        <span
-                          className="font-bold text-2xl"
-                          style={{
-                            color: config.color,
-                            textShadow: `0 0 15px ${config.color}`,
-                          }}
-                        >
-                          {prize.remainingCount}
-                        </span>
-                        <span className="text-purple-200">
-                          / {prize.totalCount}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="w-full bg-white/10 rounded-full h-3 overflow-hidden border border-white/20">
-                      <div
-                        className="h-full transition-all duration-700 rounded-full relative"
-                        style={{
-                          width: `${progress}%`,
-                          backgroundColor: config.color,
-                          boxShadow: `0 0 20px ${config.color}, inset 0 0 10px rgba(255,255,255,0.3)`,
-                        }}
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent animate-shimmer" />
-                      </div>
-                    </div>
-
-                    {/* 中奖名单 */}
-                        <div className="w-full">
-                                             {prizeWinners[prize.id] &&
-                      prizeWinners[prize.id].length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-white/10">
-                          <div className="text-xs text-purple-200 mb-2">
-                            🎉 中奖名单 ({prizeWinners[prize.id].length}人)
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            {prizeWinners[prize.id]
-                              .slice(0, 6)
-                              .map((winner, idx) => (
-                                <span
-                                  key={idx}
-                                  className="text-xs bg-white/10 px-2 py-1 rounded-full text-white/90"
-                                >
-                                  {winner}
-                                </span>
-                              ))}
-                            {prizeWinners[prize.id].length > 6 && (
-                              <span className="text-xs text-purple-300 px-2 py-1">
-                                +{prizeWinners[prize.id].length - 6}人
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                        </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-
-            {prizes.length === 0 && (
-              <Card className="bg-white/5 border-white/10 border-2">
-                <CardContent className="py-12 text-center text-purple-200">
-                  <div className="text-6xl mb-4 animate-bounce">🎁</div>
-                  <p className="mb-4 text-lg">暂无奖品</p>
-                  <Link href="/admin/prizes">
-                    <Button
-                      size="sm"
-                      className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 shadow-lg shadow-purple-500/30 border-2 border-white/20"
-                    >
-                      前往添加
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-
-          {/* 底部快捷键帮助按钮 */}
-          <div className="p-4 border-t border-white/10">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowKeyboardHelp(true)}
-              className="w-full hover:bg-white/10 gap-2 text-purple-300"
-            >
-              <Info className="h-4 w-4" />
-              快捷键帮助 (?)
-            </Button>
-          </div>
-        </div>
+        <PrizeListSidebar
+          prizes={prizes}
+          selectedPrize={selectedPrize}
+          prizeWinners={prizeWinners}
+          isDrawing={isDrawing}
+          onSelectPrize={handleSelectPrize}
+          onRefresh={loadData}
+          onShowKeyboardHelp={() => setShowKeyboardHelp(true)}
+        />
 
         {/* 右侧：3D 抽奖动画区域（铺满剩余空间） */}
         <div className="flex-1 flex flex-col relative">
@@ -773,12 +498,21 @@ export function DrawScreen() {
 
           {/* 3D 球体动画区域 - 铺满 */}
           <div className="flex-1 relative">
-            <ThreeDrawAnimation
-              names={allNames}
-              isDrawing={isDrawing}
-              winners={showResult ? currentRoundWinners : undefined}
-              onClose={handleCloseResult}
-            />
+            <ThreeErrorBoundary
+              fallbackProps={{
+                names: allNames,
+                isDrawing,
+                winners: showResult ? currentRoundWinners : undefined,
+                onClose: handleCloseResult,
+              }}
+            >
+              <ThreeDrawAnimation
+                names={allNames}
+                isDrawing={isDrawing}
+                winners={showResult ? currentRoundWinners : undefined}
+                onClose={handleCloseResult}
+              />
+            </ThreeErrorBoundary>
 
             {/* 抽奖按钮 - 浮动在底部中央 */}
             {!isDrawing && !showResult && selectedPrize && (
@@ -828,428 +562,29 @@ export function DrawScreen() {
       </div>
 
       {/* 中奖名单弹窗 */}
-      <Dialog open={winnersDialogOpen} onOpenChange={setWinnersDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden bg-gradient-to-br from-purple-900/95 via-pink-900/95 to-orange-900/95 backdrop-blur-2xl border-4 border-yellow-400/50 shadow-2xl shadow-yellow-400/30 text-white">
-          <DialogHeader>
-            <DialogTitle className="text-3xl font-bold flex items-center gap-3 text-yellow-400 drop-shadow-[0_0_25px_rgba(250,204,21,1)]">
-              <Trophy className="h-10 w-10 animate-bounce" />
-              {selectedPrize?.name}
-              <span className="text-white/80 text-2xl font-normal">
-                - 中奖名单
-              </span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="overflow-y-auto max-h-[60vh] pr-2 custom-scrollbar">
-            {/* 当前轮中奖名单 */}
-            {currentRoundWinners.length > 0 && (
-              <div className="mb-6">
-                <h3 className="text-xl font-bold mb-4 text-yellow-400 flex items-center gap-2 pb-3 border-b-2 border-yellow-400/30">
-                  <span className="text-2xl">🎉</span> 本轮中奖名单
-                  <span className="bg-yellow-400/30 px-3 py-1 rounded-full text-sm ml-auto">
-                    {currentRoundWinners.length} 人
-                  </span>
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {currentRoundWinners.map((winner, idx) => (
-                    <div
-                      key={idx}
-                      className="group relative bg-gradient-to-br from-yellow-400/20 to-orange-600/20 backdrop-blur-xl rounded-2xl border-3 border-yellow-400/60 p-4 text-center animate-in fade-in slide-in-from-bottom-4 duration-500 hover:scale-105 transition-transform"
-                      style={{ animationDelay: `${idx * 80}ms` }}
-                    >
-                      {/* 发光背景 */}
-                      <div className="absolute inset-0 bg-gradient-to-br from-yellow-400/30 via-orange-500/30 to-pink-500/30 rounded-2xl blur-xl group-hover:blur-2xl transition-all duration-500 animate-pulse" />
-
-                      {/* 序号 */}
-                      <div className="absolute -top-3 -left-3 w-10 h-10 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-lg font-bold text-black shadow-lg">
-                        {idx + 1}
-                      </div>
-
-                      <div className="relative z-10">
-                        <div className="text-2xl font-bold text-white mb-1 drop-shadow-lg">
-                          {winner}
-                        </div>
-                        <div className="text-sm text-yellow-200">🎉 中奖者</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 历史中奖名单 */}
-            {selectedPrize && prizeWinners[selectedPrize.id]?.length > 0 && (
-              <div className="mb-6">
-                <h3 className="text-xl font-bold mb-4 text-purple-300 flex items-center gap-2 pb-3 border-b-2 border-purple-400/30">
-                  <span className="text-2xl">🏆</span> 历史中奖名单
-                  <span className="bg-purple-400/30 px-3 py-1 rounded-full text-sm ml-auto">
-                    {prizeWinners[selectedPrize.id].length} 人
-                  </span>
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {prizeWinners[selectedPrize.id].map((winner, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-gradient-to-br from-purple-500/20 to-pink-600/20 backdrop-blur-xl rounded-2xl border-2 border-purple-400/40 p-4 text-center hover:scale-105 transition-transform"
-                    >
-                      <div className="text-lg font-semibold text-white mb-1 drop-shadow">
-                        {winner}
-                      </div>
-                      <div className="text-xs text-purple-200">🏆 中奖者</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 如果没有中奖记录 */}
-            {(!selectedPrize || prizeWinners[selectedPrize.id]?.length === 0) &&
-              currentRoundWinners.length === 0 && (
-                <div className="text-center py-16">
-                  <div className="text-8xl mb-6 animate-bounce">🏆</div>
-                  <p className="text-2xl text-purple-200 font-semibold">
-                    暂无中奖记录
-                  </p>
-                  <p className="text-sm text-purple-300 mt-2">
-                    开始抽奖后将在此显示中奖名单
-                  </p>
-                </div>
-              )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <WinnersDialog
+        open={winnersDialogOpen}
+        onOpenChange={setWinnersDialogOpen}
+        selectedPrize={selectedPrize}
+        currentRoundWinners={currentRoundWinners}
+        prizeWinners={prizeWinners}
+      />
 
       {/* 抽奖确认对话框 */}
-      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <AlertDialogContent className="max-w-lg bg-gradient-to-br from-purple-900/95 via-pink-900/95 to-orange-900/95 backdrop-blur-2xl border-4 border-yellow-400/50 shadow-2xl shadow-yellow-400/30 text-white">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-3xl font-bold flex items-center gap-3 text-yellow-400 drop-shadow-[0_0_25px_rgba(250,204,21,1)]">
-              <Trophy className="h-10 w-10 animate-bounce" />
-              确认开始抽奖
-            </AlertDialogTitle>
-            <div className="text-lg text-purple-100 pt-4">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 p-3 bg-white/10 rounded-lg">
-                  <Gift className="h-5 w-5 text-yellow-400" />
-                  <span className="font-semibold">奖品：</span>
-                  <span className="text-yellow-300 font-bold">
-                    {selectedPrize?.name}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 p-3 bg-white/10 rounded-lg">
-                  <Info className="h-5 w-5 text-blue-400" />
-                  <span>剩余数量：</span>
-                  <span className="text-yellow-300 font-bold">
-                    {selectedPrize?.remainingCount}
-                  </span>
-                  <span className="text-gray-300">
-                    / {selectedPrize?.totalCount}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 p-3 bg-white/10 rounded-lg">
-                  <Zap className="h-5 w-5 text-orange-400" />
-                  <span>符合条件人数：</span>
-                  <span className="text-green-300 font-bold">
-                    {
-                      users.filter(
-                        (u) => !u.hasWon || (rule && rule.allowRepeatWin),
-                      ).length
-                    }
-                  </span>
-                </div>
-                <div className="mt-4 p-4 bg-yellow-400/20 border-2 border-yellow-400/50 rounded-lg">
-                  <p className="text-yellow-200 text-sm">
-                    ⚠️ 确认后开始10秒抽奖动画，动画结束后将自动抽取中奖者
-                  </p>
-                </div>
-              </div>
-            </div>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="mt-4">
-            <AlertDialogCancel className="bg-white/10 hover:bg-white/20 border-white/30 text-white">
-              取消
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDraw}
-              className="bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-black font-bold px-8"
-            >
-              确认开始
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDrawDialog
+        open={showConfirmDialog}
+        onOpenChange={setShowConfirmDialog}
+        onConfirm={confirmDraw}
+        selectedPrize={selectedPrize}
+        rule={rule}
+        users={users}
+      />
 
       {/* 快捷键帮助对话框 */}
-      <Dialog open={showKeyboardHelp} onOpenChange={setShowKeyboardHelp}>
-        <DialogContent className="max-w-lg bg-gradient-to-br from-purple-900/95 via-pink-900/95 to-orange-900/95 backdrop-blur-2xl border-4 border-purple-400/50 shadow-2xl shadow-purple-400/30 text-white">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-purple-300">
-              <Info className="h-8 w-8" />
-              快捷键帮助
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 mt-4">
-            <div className="flex items-center justify-between p-3 bg-white/10 rounded-lg">
-              <div className="flex items-center gap-3">
-                <div className="flex gap-1">
-                  <kbd className="px-3 py-1 bg-white/20 rounded-md text-sm font-mono">
-                    空格
-                  </kbd>
-                </div>
-                <span className="text-purple-200">开始抽奖</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-white/10 rounded-lg">
-              <div className="flex items-center gap-3">
-                <kbd className="px-3 py-1 bg-white/20 rounded-md text-sm font-mono">
-                  ESC
-                </kbd>
-                <span className="text-purple-200">关闭弹窗</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-white/10 rounded-lg">
-              <div className="flex items-center gap-3">
-                <div className="flex gap-1">
-                  <kbd className="px-3 py-1 bg-white/20 rounded-md text-sm font-mono">
-                    S
-                  </kbd>
-                </div>
-                <span className="text-purple-200">统计面板</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-white/10 rounded-lg">
-              <div className="flex items-center gap-3">
-                <div className="flex gap-1">
-                  <kbd className="px-3 py-1 bg-white/20 rounded-md text-sm font-mono">
-                    R
-                  </kbd>
-                </div>
-                <span className="text-purple-200">刷新数据</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-white/10 rounded-lg">
-              <div className="flex items-center gap-3">
-                <div className="flex gap-1">
-                  <kbd className="px-3 py-1 bg-white/20 rounded-md text-sm font-mono">
-                    M
-                  </kbd>
-                </div>
-                <span className="text-purple-200">切换音效</span>
-              </div>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-white/10 rounded-lg">
-              <div className="flex items-center gap-3">
-                <div className="flex gap-1">
-                  <kbd className="px-3 py-1 bg-white/20 rounded-md text-sm font-mono">
-                    1
-                  </kbd>
-                  <kbd className="px-3 py-1 bg-white/20 rounded-md text-sm font-mono">
-                    2
-                  </kbd>
-                  <kbd className="px-3 py-1 bg-white/20 rounded-md text-sm font-mono">
-                    3
-                  </kbd>
-                  <span className="text-xs text-purple-400">...</span>
-                </div>
-                <span className="text-purple-200">快速选择奖品</span>
-              </div>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* 图片预览对话框 */}
-      <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
-        <DialogContent className="max-w-4xl bg-black/95 backdrop-blur-2xl border-2 border-white/20 shadow-2xl">
-          <div className="relative">
-            <img
-              src={previewImage || ""}
-              alt="预览"
-              className="w-full h-auto max-h-[80vh] object-contain"
-            />
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setPreviewImage(null)}
-              className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 text-white"
-            >
-              <X className="h-6 w-6" />
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* 自定义动画 */}
-      <style jsx global>{`
-        @keyframes shimmer {
-          0% {
-            transform: translateX(-100%);
-          }
-          100% {
-            transform: translateX(100%);
-          }
-        }
-        .animate-shimmer {
-          animation: shimmer 2s infinite;
-        }
-
-        @keyframes bounce-slow {
-          0%,
-          100% {
-            transform: translateY(0);
-          }
-          50% {
-            transform: translateY(-10px);
-          }
-        }
-        .animate-bounce-slow {
-          animation: bounce-slow 3s ease-in-out infinite;
-        }
-
-        /* 烟花爆炸效果 */
-        @keyframes firework {
-          0% {
-            transform: scale(0) rotate(0deg);
-            opacity: 1;
-          }
-          50% {
-            transform: scale(1.5) rotate(180deg);
-            opacity: 0.8;
-          }
-          100% {
-            transform: scale(2) rotate(360deg);
-            opacity: 0;
-          }
-        }
-        .animate-firework {
-          animation: firework 1.5s ease-out forwards;
-        }
-
-        /* 星星闪烁效果 */
-        @keyframes twinkle {
-          0%,
-          100% {
-            opacity: 0.3;
-            transform: scale(0.8);
-          }
-          50% {
-            opacity: 1;
-            transform: scale(1.2);
-          }
-        }
-        .animate-twinkle {
-          animation: twinkle 0.8s ease-in-out infinite;
-        }
-
-        /* 彩虹旋转 */
-        @keyframes rainbow-rotate {
-          0% {
-            filter: hue-rotate(0deg);
-            transform: rotate(0deg);
-          }
-          100% {
-            filter: hue-rotate(360deg);
-            transform: rotate(360deg);
-          }
-        }
-        .animate-rainbow {
-          animation: rainbow-rotate 3s linear infinite;
-        }
-
-        /* 弹性放大 */
-        @keyframes pop-in {
-          0% {
-            transform: scale(0) rotate(-180deg);
-            opacity: 0;
-          }
-          50% {
-            transform: scale(1.2) rotate(10deg);
-          }
-          100% {
-            transform: scale(1) rotate(0deg);
-            opacity: 1;
-          }
-        }
-        .animate-pop-in {
-          animation: pop-in 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
-        }
-
-        /* 光晕扩散 */
-        @keyframes glow-expand {
-          0% {
-            box-shadow: 0 0 5px rgba(250, 204, 21, 0.5);
-            transform: scale(1);
-          }
-          50% {
-            box-shadow: 0 0 30px rgba(250, 204, 21, 0.8);
-            transform: scale(1.05);
-          }
-          100% {
-            box-shadow: 0 0 5px rgba(250, 204, 21, 0.5);
-            transform: scale(1);
-          }
-        }
-        .animate-glow {
-          animation: glow-expand 2s ease-in-out infinite;
-        }
-
-        /* 漂浮动画 */
-        @keyframes float {
-          0%,
-          100% {
-            transform: translateY(0) rotate(0deg);
-          }
-          25% {
-            transform: translateY(-10px) rotate(5deg);
-          }
-          75% {
-            transform: translateY(10px) rotate(-5deg);
-          }
-        }
-        .animate-float {
-          animation: float 3s ease-in-out infinite;
-        }
-
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.05);
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: linear-gradient(
-            to bottom,
-            rgba(168, 85, 247, 0.5),
-            rgba(236, 72, 153, 0.5)
-          );
-          border-radius: 3px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: linear-gradient(
-            to bottom,
-            rgba(168, 85, 247, 0.7),
-            rgba(236, 72, 153, 0.7)
-          );
-        }
-
-        .delay-100 {
-          animation-delay: 100ms;
-        }
-        .delay-300 {
-          animation-delay: 300ms;
-        }
-        .delay-500 {
-          animation-delay: 500ms;
-        }
-        .delay-700 {
-          animation-delay: 700ms;
-        }
-        .delay-1000 {
-          animation-delay: 1000ms;
-        }
-        .delay-2000 {
-          animation-delay: 2000ms;
-        }
-      `}</style>
+      <KeyboardHelpDialog
+        open={showKeyboardHelp}
+        onOpenChange={setShowKeyboardHelp}
+      />
     </div>
   );
 }
