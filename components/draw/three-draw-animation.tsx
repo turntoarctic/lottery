@@ -13,7 +13,6 @@ import {
   OrbitControls,
   Text,
   Stars,
-  Float,
   PerspectiveCamera,
   Billboard,
 } from "@react-three/drei";
@@ -43,10 +42,20 @@ function NameSphere({ names, isDrawing, onHighlightChange }: NameSphereProps) {
   useEffect(() => {
     if (isDrawing) {
       drawStartTime.current = Date.now();
-      setHighlightedIndex(-1);
       highlightedIndexRef.current = -1;
     }
   }, [isDrawing]);
+
+  // 在 isDrawing 变化时重置高亮索引
+  useEffect(() => {
+    if (isDrawing && highlightedIndex !== -1) {
+      // 使用 setTimeout 避免在 effect 中同步调用 setState
+      const timer = setTimeout(() => {
+        setHighlightedIndex(-1);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [isDrawing, highlightedIndex]);
 
   // 使用 useMemo 缓存位置计算
   const points = useMemo(() => {
@@ -245,27 +254,24 @@ function ParticleRing({ isDrawing }: { isDrawing: boolean }) {
   const points = useRef<THREE.Points>(null);
   const particlesCount = 400;
 
-  // 使用 useMemo 缓存粒子位置和颜色（使用确定性种子）
+  // 使用 useMemo 缓存粒子位置和颜色（使用确定性计算）
   const { positions, colors } = useMemo(() => {
     const positions = new Float32Array(particlesCount * 3);
     const colors = new Float32Array(particlesCount * 3);
 
-    // 使用简单的伪随机数生成器，避免 Math.random
-    let seed = 12345;
-    const random = () => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      return seed / 0x7fffffff;
-    };
-
+    // 使用索引生成确定性但看起来随机的分布
     for (let i = 0; i < particlesCount; i++) {
-      const theta = random() * Math.PI * 2;
-      const phi = Math.acos(random() * 2 - 1);
-      const r = 5 + random() * 1;
+      // 使用索引和质数生成确定性值
+      const theta = ((i * 137) % 1000) / 1000 * Math.PI * 2;
+      const phi = Math.acos((((i * 97) % 1000) / 1000) * 2 - 1);
+      const r = 5 + (((i * 251) % 100) / 100) * 1;
+
       positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
       positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       positions[i * 3 + 2] = r * Math.cos(phi);
 
-      const colorChoice = Math.floor(random() * 3);
+      // 确定性颜色选择
+      const colorChoice = i % 3;
       if (colorChoice === 0) {
         colors[i * 3] = 0.69;
         colors[i * 3 + 1] = 0.33;
@@ -318,20 +324,17 @@ function RisingBubbles({ isDrawing }: { isDrawing: boolean }) {
 
   // 使用 useMemo 缓存气泡位置（使用确定性种子）
   const bubbles = useMemo(() => {
-    // 使用简单的伪随机数生成器
-    let seed = 54321;
-    const random = () => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      return seed / 0x7fffffff;
-    };
+    // 使用索引生成确定性位置，完全避免随机数
+    return Array.from({ length: 8 }, (_, i) => {
+      // 使用索引和质数生成确定性但看起来随机的值
+      const theta = ((i * 137) % 256) / 256 * Math.PI * 2;
+      const r = ((i * 97) % 100) / 100 * 6;
+      const y = (((i * 251) % 200) - 100) / 100 * 5;
 
-    return Array.from({ length: 8 }, () => {
-      const theta = random() * Math.PI * 2;
-      const r = random() * 6;
       return {
         position: [
           Math.cos(theta) * r,
-          (random() - 0.5) * 10,
+          y,
           Math.sin(theta) * r,
         ] as [number, number, number],
       };
@@ -389,7 +392,11 @@ function CountdownProgress({ isDrawing }: { isDrawing: boolean }) {
     if (isDrawing) {
       startTime.current = Date.now();
 
+      let isCancelled = false;
+
       const updateProgress = () => {
+        if (isCancelled) return;
+
         const elapsed = (Date.now() - startTime.current) / 1000;
         const newProgress = Math.min((elapsed / 10) * 100, 100);
         const newRemaining = Math.max(0, 10 - elapsed);
@@ -406,14 +413,19 @@ function CountdownProgress({ isDrawing }: { isDrawing: boolean }) {
       requestRef.current = requestAnimationFrame(updateProgress);
 
       return () => {
+        isCancelled = true;
         if (requestRef.current) {
           cancelAnimationFrame(requestRef.current);
         }
       };
     } else {
-      // 只在停止抽奖时重置
-      setProgress(0);
-      setRemaining(10);
+      // 延迟重置,避免在 effect 中同步调用 setState
+      const resetTimer = setTimeout(() => {
+        setProgress(0);
+        setRemaining(10);
+      }, 0);
+
+      return () => clearTimeout(resetTimer);
     }
   }, [isDrawing]);
 
