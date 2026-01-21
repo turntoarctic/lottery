@@ -595,7 +595,6 @@ export function DrawScreen() {
                     {prize.imageUrl && (
                       <div
                         className="relative h-32 w-full -mx-4 -mt-4 mb-3 cursor-pointer group"
-                        // onClick={() => setPreviewImage(prize.imageUrl!)}
                       >
                         <img
                           src={prize.imageUrl}

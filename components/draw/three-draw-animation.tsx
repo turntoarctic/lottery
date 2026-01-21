@@ -243,22 +243,29 @@ function OuterGlowRing({ isDrawing }: { isDrawing: boolean }) {
 // 粒子环 - 优化版（使用 useMemo 缓存几何体）
 function ParticleRing({ isDrawing }: { isDrawing: boolean }) {
   const points = useRef<THREE.Points>(null);
-  const particlesCount = 400; // 进一步减少到400
+  const particlesCount = 400;
 
-  // 使用 useMemo 缓存粒子位置和颜色
+  // 使用 useMemo 缓存粒子位置和颜色（使用确定性种子）
   const { positions, colors } = useMemo(() => {
     const positions = new Float32Array(particlesCount * 3);
     const colors = new Float32Array(particlesCount * 3);
 
+    // 使用简单的伪随机数生成器，避免 Math.random
+    let seed = 12345;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+
     for (let i = 0; i < particlesCount; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(Math.random() * 2 - 1);
-      const r = 5 + Math.random() * 1;
+      const theta = random() * Math.PI * 2;
+      const phi = Math.acos(random() * 2 - 1);
+      const r = 5 + random() * 1;
       positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
       positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       positions[i * 3 + 2] = r * Math.cos(phi);
 
-      const colorChoice = Math.floor(Math.random() * 3);
+      const colorChoice = Math.floor(random() * 3);
       if (colorChoice === 0) {
         colors[i * 3] = 0.69;
         colors[i * 3 + 1] = 0.33;
@@ -309,15 +316,22 @@ function ParticleRing({ isDrawing }: { isDrawing: boolean }) {
 function RisingBubbles({ isDrawing }: { isDrawing: boolean }) {
   const groupRef = useRef<THREE.Group>(null);
 
-  // 使用 useMemo 缓存气泡位置
+  // 使用 useMemo 缓存气泡位置（使用确定性种子）
   const bubbles = useMemo(() => {
-    return Array.from({ length: 8 }, (_, i) => { // 从12减少到8
-      const theta = Math.random() * Math.PI * 2;
-      const r = Math.random() * 6;
+    // 使用简单的伪随机数生成器
+    let seed = 54321;
+    const random = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+
+    return Array.from({ length: 8 }, () => {
+      const theta = random() * Math.PI * 2;
+      const r = random() * 6;
       return {
         position: [
           Math.cos(theta) * r,
-          (Math.random() - 0.5) * 10,
+          (random() - 0.5) * 10,
           Math.sin(theta) * r,
         ] as [number, number, number],
       };
@@ -374,13 +388,13 @@ function CountdownProgress({ isDrawing }: { isDrawing: boolean }) {
   useEffect(() => {
     if (isDrawing) {
       startTime.current = Date.now();
-      setProgress(0);
-      setRemaining(10);
 
       const updateProgress = () => {
         const elapsed = (Date.now() - startTime.current) / 1000;
         const newProgress = Math.min((elapsed / 10) * 100, 100);
         const newRemaining = Math.max(0, 10 - elapsed);
+
+        // 批量更新状态
         setProgress(newProgress);
         setRemaining(newRemaining);
 
@@ -390,16 +404,17 @@ function CountdownProgress({ isDrawing }: { isDrawing: boolean }) {
       };
 
       requestRef.current = requestAnimationFrame(updateProgress);
+
+      return () => {
+        if (requestRef.current) {
+          cancelAnimationFrame(requestRef.current);
+        }
+      };
     } else {
+      // 只在停止抽奖时重置
       setProgress(0);
       setRemaining(10);
     }
-
-    return () => {
-      if (requestRef.current) {
-        cancelAnimationFrame(requestRef.current);
-      }
-    };
   }, [isDrawing]);
 
   if (!isDrawing) return null;
@@ -447,12 +462,11 @@ export function ThreeDrawAnimation({
 
   // 使用 useCallback 缓存回调
   const handleHighlightChange = useCallback((index: number) => {
-    setHighlightedName(prev => {
-      if (index >= 0 && index < names.length) {
-        return names[index];
-      }
-      return "";
-    });
+    if (index >= 0 && index < names.length) {
+      setHighlightedName(names[index]);
+    } else {
+      setHighlightedName("");
+    }
   }, [names]);
 
   return (
@@ -561,20 +575,27 @@ export function ThreeDrawAnimation({
 
               {/* Modal 内容 */}
               <div className="p-12 text-center">
-                {/* 烟花效果背景 - 减少数量 */}
+                {/* 烟花效果背景 - 使用静态预计算位置 */}
                 <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                  {[...Array(30)].map((_, i) => (
-                    <div
-                      key={i}
-                      className="absolute w-2 h-2 bg-yellow-400 rounded-full animate-ping"
-                      style={{
-                        left: `${Math.random() * 100}%`,
-                        top: `${Math.random() * 100}%`,
-                        animationDelay: `${Math.random() * 2000}ms`,
-                        animationDuration: `${1000 + Math.random() * 1000}ms`,
-                      }}
-                    />
-                  ))}
+                  {Array.from({ length: 30 }, (_, i) => {
+                    // 使用索引生成确定性位置，避免 Math.random
+                    const left = ((i * 137) % 100);
+                    const top = ((i * 251) % 100);
+                    const delay = ((i * 73) % 2000);
+                    const duration = 1000 + ((i * 97) % 1000);
+                    return (
+                      <div
+                        key={i}
+                        className="absolute w-2 h-2 bg-yellow-400 rounded-full animate-ping"
+                        style={{
+                          left: `${left}%`,
+                          top: `${top}%`,
+                          animationDelay: `${delay}ms`,
+                          animationDuration: `${duration}ms`,
+                        }}
+                      />
+                    );
+                  })}
                 </div>
 
                 {/* 奖杯图标 */}
