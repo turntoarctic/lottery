@@ -34,6 +34,24 @@ export default function UsersPage() {
     }
   };
 
+  // 通知抽奖页面数据已更新
+  const notifyDataUpdate = () => {
+    // 方法1: 触发自定义事件（同一页面）
+    window.dispatchEvent(new Event('data-updated'));
+
+    // 方法2: 更新 localStorage（跨标签页）
+    localStorage.setItem('lottery-data-updated', Date.now().toString());
+
+    // 方法3: 广播频道（跨窗口、跨标签页）
+    try {
+      const channel = new BroadcastChannel('lottery-data-sync');
+      channel.postMessage({ type: 'data-updated', timestamp: Date.now() });
+      channel.close();
+    } catch (e) {
+      console.log('BroadcastChannel not supported');
+    }
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
@@ -74,6 +92,7 @@ export default function UsersPage() {
 
       if (res.ok) {
         await loadUsers();
+        notifyDataUpdate(); // 通知抽奖页面数据已更新
         setFile(null);
         const fileInput = document.getElementById('file-input') as HTMLInputElement;
         if (fileInput) fileInput.value = '';
@@ -95,6 +114,7 @@ export default function UsersPage() {
 
       if (res.ok) {
         await loadUsers();
+        notifyDataUpdate(); // 通知抽奖页面数据已更新
         alert('用户列表已清空');
       } else {
         alert('清空失败');

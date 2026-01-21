@@ -42,6 +42,24 @@ export default function PrizesPage() {
     }
   };
 
+  // 通知抽奖页面数据已更新
+  const notifyDataUpdate = () => {
+    // 方法1: 触发自定义事件（同一页面）
+    window.dispatchEvent(new Event('data-updated'));
+
+    // 方法2: 更新 localStorage（跨标签页）
+    localStorage.setItem('lottery-data-updated', Date.now().toString());
+
+    // 方法3: 广播频道（跨窗口、跨标签页）
+    try {
+      const channel = new BroadcastChannel('lottery-data-sync');
+      channel.postMessage({ type: 'data-updated', timestamp: Date.now() });
+      channel.close();
+    } catch (e) {
+      console.log('BroadcastChannel not supported');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -57,6 +75,7 @@ export default function PrizesPage() {
 
       if (res.ok) {
         await loadPrizes();
+        notifyDataUpdate(); // 通知抽奖页面数据已更新
         setIsDialogOpen(false);
         resetForm();
       } else {
@@ -108,6 +127,7 @@ export default function PrizesPage() {
 
       if (res.ok) {
         await loadPrizes();
+        notifyDataUpdate(); // 通知抽奖页面数据已更新
       } else {
         alert('删除失败');
       }

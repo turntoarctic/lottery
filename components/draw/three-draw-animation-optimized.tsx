@@ -1,121 +1,161 @@
-"use client";
+'use client';
 
 /**
- * 3D 球型抽奖动画 - 优雅版
- * 渐进式加速减速：慢速启动 → 加速 → 高速旋转 → 减速 → 停止
- * 聚光灯效果：随机高亮名字
- * 倒计时进度条
+ * 3D 球型抽奖动画 - 性能优化版
+ * 针对低端电脑优化，减少粒子数量、几何体复杂度
+ * 添加性能自适应机制
  */
 
-import { useRef, useState, useEffect, useMemo, useCallback } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
-import {
-  OrbitControls,
-  Text,
-  Stars,
-  Float,
-  PerspectiveCamera,
-  Billboard,
-} from "@react-three/drei";
-import * as THREE from "three";
-import { Button } from "@/components/ui/button";
-import { X } from "lucide-react";
+import { useRef, useState, useEffect, useMemo } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, Text, Stars, PerspectiveCamera, Billboard } from '@react-three/drei';
+import * as THREE from 'three';
+import { Button } from '@/components/ui/button';
+import { X, Cpu } from 'lucide-react';
+
+// 性能配置
+const PERFORMANCE_CONFIG = {
+  low: {
+    particlesCount: 300,
+    starsCount: 2000,
+    sphereSegments: 16,
+    ringSegments: 32,
+    bubbleCount: 8,
+    textOutlineWidth: 0.01,
+    maxVisibleNames: 30, // 最多显示30个名字
+  },
+  medium: {
+    particlesCount: 600,
+    starsCount: 4000,
+    sphereSegments: 24,
+    ringSegments: 48,
+    bubbleCount: 15,
+    textOutlineWidth: 0.02,
+    maxVisibleNames: 50,
+  },
+  high: {
+    particlesCount: 1000,
+    starsCount: 6000,
+    sphereSegments: 32,
+    ringSegments: 64,
+    bubbleCount: 20,
+    textOutlineWidth: 0.03,
+    maxVisibleNames: 100,
+  },
+};
+
+// 检测设备性能
+function detectPerformance(): 'low' | 'medium' | 'high' {
+  if (typeof window === 'undefined') return 'medium';
+
+  // 检测硬件并发数
+  const cores = navigator.hardwareConcurrency || 2;
+
+  // 检测设备内存
+  const memory = (navigator as any).deviceMemory || 4;
+
+  // 检测屏幕分辨率
+  const pixelRatio = window.devicePixelRatio;
+
+  // 综合评分
+  let score = 0;
+  if (cores >= 8) score += 3;
+  else if (cores >= 4) score += 2;
+  else score += 1;
+
+  if (memory >= 8) score += 3;
+  else if (memory >= 4) score += 2;
+  else score += 1;
+
+  if (pixelRatio <= 1.5) score += 2;
+  else if (pixelRatio <= 2) score += 1;
+
+  if (score >= 7) return 'high';
+  if (score >= 4) return 'medium';
+  return 'low';
+}
 
 interface NameSphereProps {
   names: string[];
   isDrawing: boolean;
+  config: typeof PERFORMANCE_CONFIG.low;
   onHighlightChange?: (highlightedIndex: number) => void;
 }
 
-// 名字球体组件 - 优雅版（使用 Billboard 始终面向相机）
-function NameSphere({ names, isDrawing, onHighlightChange }: NameSphereProps) {
+// 名字球体组件 - 优化版
+function NameSphere({ names, isDrawing, config, onHighlightChange }: NameSphereProps) {
   const groupRef = useRef<THREE.Group>(null);
   const drawStartTime = useRef<number>(0);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const lastHighlightTime = useRef(0);
-  const highlightedIndexRef = useRef(-1);
 
-  // 同步 ref 和 state
-  useEffect(() => {
-    highlightedIndexRef.current = highlightedIndex;
-  }, [highlightedIndex]);
+  // 根据性能限制显示的名字数量
+  const visibleNames = useMemo(() => {
+    if (names.length <= config.maxVisibleNames) return names;
+    // 随机采样，避免总是显示前面的名字
+    const shuffled = [...names].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, config.maxVisibleNames);
+  }, [names, config.maxVisibleNames]);
 
   useEffect(() => {
     if (isDrawing) {
       drawStartTime.current = Date.now();
       setHighlightedIndex(-1);
-      highlightedIndexRef.current = -1;
     }
   }, [isDrawing]);
-
-  // 使用 useMemo 缓存位置计算
-  const points = useMemo(() => {
-    const phi = Math.PI * (3 - Math.sqrt(5));
-    return names.map((name, i) => {
-      const y = 1 - (i / (names.length - 1 || 1)) * 2;
-      const radiusAtY = Math.sqrt(1 - y * y);
-      const theta = phi * i;
-      const x = Math.cos(theta) * radiusAtY;
-      const z = Math.sin(theta) * radiusAtY;
-      return { x, y, z, name };
-    });
-  }, [names]);
-
-  // 使用 useCallback 缓存回调
-  const handleHighlightChange = useCallback((index: number) => {
-    if (highlightedIndexRef.current !== index) {
-      setHighlightedIndex(index);
-      onHighlightChange?.(index);
-    }
-  }, [onHighlightChange]);
 
   useFrame(() => {
     if (!groupRef.current) return;
 
     if (isDrawing) {
-      const elapsed = (Date.now() - drawStartTime.current) / 1000; // 秒
+      const elapsed = (Date.now() - drawStartTime.current) / 1000;
 
-      // 渐进式速度曲线（简化计算）
+      // 简化的速度曲线
       let speed;
       if (elapsed < 3) {
         const progress = elapsed / 3;
-        const eased = progress < 0.5
-          ? 4 * progress * progress * progress
-          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-        speed = 0.2 + eased * 2.8;
+        speed = 0.2 + progress * 2;
       } else if (elapsed < 7) {
-        speed = 3;
+        speed = 2.2;
       } else {
         const progress = (elapsed - 7) / 3;
-        const eased = progress < 0.5
-          ? 4 * progress * progress * progress
-          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-        speed = 3 - eased * 2.9;
+        speed = 2.2 - progress * 2;
       }
 
-      // 应用旋转
       groupRef.current.rotation.y += speed * 0.016;
       groupRef.current.rotation.x += speed * 0.008;
 
-      // 聚光灯效果：减少状态更新频率到500ms
+      // 减少高亮频率以降低渲染压力
       if (elapsed > 2 && elapsed < 9) {
         const now = Date.now();
-        if (now - lastHighlightTime.current > 500) {
+        if (now - lastHighlightTime.current > 300) { // 从150ms增加到300ms
           lastHighlightTime.current = now;
-          const randomIndex = Math.floor(Math.random() * names.length);
-          handleHighlightChange(randomIndex);
+          const randomIndex = Math.floor(Math.random() * visibleNames.length);
+          setHighlightedIndex(randomIndex);
+          onHighlightChange?.(randomIndex);
         }
-      } else if (highlightedIndexRef.current !== -1) {
-        handleHighlightChange(-1);
+      } else {
+        setHighlightedIndex(-1);
+        onHighlightChange?.(-1);
       }
     } else {
-      // 待机状态：缓慢旋转
+      // 待机状态：更缓慢的旋转
       groupRef.current.rotation.y += 0.03 * 0.016;
       groupRef.current.rotation.x += 0.015 * 0.016;
-      if (highlightedIndexRef.current !== -1) {
-        handleHighlightChange(-1);
-      }
+      setHighlightedIndex(-1);
+      onHighlightChange?.(-1);
     }
+  });
+
+  // 使用斐波那契球面算法分布名字
+  const phi = Math.PI * (3 - Math.sqrt(5));
+  const points = visibleNames.map((name, i) => {
+    const y = 1 - (i / (visibleNames.length - 1 || 1)) * 2;
+    const radiusAtY = Math.sqrt(1 - y * y);
+    const theta = phi * i;
+    const x = Math.cos(theta) * radiusAtY;
+    const z = Math.sin(theta) * radiusAtY;
+    return { x, y, z, name };
   });
 
   return (
@@ -123,17 +163,12 @@ function NameSphere({ names, isDrawing, onHighlightChange }: NameSphereProps) {
       {points.map((point, index) => {
         const isHighlighted = highlightedIndex === index;
         return (
-          <Billboard
-            key={index}
-            position={[point.x * 4, point.y * 4, point.z * 4]}
-          >
+          <Billboard key={index} position={[point.x * 4, point.y * 4, point.z * 4]}>
             {/* 移除Float组件以提升性能，改用简单的缩放动画 */}
             <group scale={isHighlighted ? 1.2 : 1}>
-              {/* 背景卡片 */}
+              {/* 背景卡片 - 使用更简单的几何体 */}
               <mesh position={[0, 0, -0.05]}>
-                <planeGeometry
-                  args={[isHighlighted ? 2 : 1.5, isHighlighted ? 0.6 : 0.5]}
-                />
+                <planeGeometry args={[isHighlighted ? 2 : 1.5, isHighlighted ? 0.6 : 0.5]} />
                 <meshBasicMaterial
                   color={isHighlighted ? "#fbbf24" : "#a855f7"}
                   transparent
@@ -146,7 +181,7 @@ function NameSphere({ names, isDrawing, onHighlightChange }: NameSphereProps) {
                 color={isHighlighted ? "#fbbf24" : "#ffffff"}
                 anchorX="center"
                 anchorY="middle"
-                outlineWidth={isHighlighted ? 0.03 : 0.01} // 减少outline宽度
+                outlineWidth={config.textOutlineWidth}
                 outlineColor={isHighlighted ? "#f59e0b" : "#a855f7"}
                 outlineOpacity={0.7}
               >
@@ -160,97 +195,69 @@ function NameSphere({ names, isDrawing, onHighlightChange }: NameSphereProps) {
   );
 }
 
-// 内部发光球体 - 优化版（使用 useMemo 缓存）
-function InnerGlowSphere({ isDrawing }: { isDrawing: boolean }) {
+// 内部发光球体 - 减少面数
+function InnerGlowSphere({ isDrawing, segments }: { isDrawing: boolean; segments: number }) {
   const meshRef = useRef<THREE.Mesh>(null);
-  const materialRef = useRef<THREE.MeshStandardMaterial>(null);
 
   useFrame((state) => {
     if (meshRef.current) {
-      const speed = isDrawing ? 0.3 : 0.1; // 进一步降低速度
+      const speed = isDrawing ? 0.4 : 0.12;
       meshRef.current.rotation.x = state.clock.elapsedTime * speed;
       meshRef.current.rotation.y = state.clock.elapsedTime * speed * 1.3;
     }
-
-    // 更新材质属性
-    if (materialRef.current) {
-      materialRef.current.emissiveIntensity = isDrawing ? 0.8 : 0.5;
-      materialRef.current.opacity = isDrawing ? 0.4 : 0.3;
-    }
   });
 
-  // 使用 useMemo 缓存几何体和材质
-  const { geometry, material } = useMemo(() => {
-    return {
-      geometry: new THREE.SphereGeometry(2.5, 20, 20), // 从24减少到20
-      material: new THREE.MeshStandardMaterial({
-        color: "#8b5cf6",
-        emissive: "#8b5cf6",
-        emissiveIntensity: 0.5,
-        transparent: true,
-        opacity: 0.3,
-        wireframe: true,
-      }),
-    };
-  }, []);
-
   return (
-    <mesh ref={meshRef} geometry={geometry}>
-      <primitive object={material} ref={materialRef} />
+    <mesh ref={meshRef}>
+      <sphereGeometry args={[2.5, segments, segments]} />
+      <meshStandardMaterial
+        color="#8b5cf6"
+        emissive="#8b5cf6"
+        emissiveIntensity={isDrawing ? 1 : 0.7}
+        transparent
+        opacity={isDrawing ? 0.45 : 0.35}
+        wireframe
+      />
     </mesh>
   );
 }
 
-// 外部光环 - 优化版（使用 useMemo 缓存）
-function OuterGlowRing({ isDrawing }: { isDrawing: boolean }) {
+// 外部光环 - 减少段数
+function OuterGlowRing({ isDrawing, segments }: { isDrawing: boolean; segments: number }) {
   const meshRef = useRef<THREE.Mesh>(null);
-  const materialRef = useRef<THREE.MeshBasicMaterial>(null);
 
   useFrame((state) => {
     if (meshRef.current) {
-      const speed = isDrawing ? 0.8 : 0.2; // 进一步降低速度
-      const scale = 1 + Math.sin(state.clock.elapsedTime * (isDrawing ? 2 : 1)) * 0.06;
+      const speed = isDrawing ? 1.2 : 0.25;
+      const scale = 1 + Math.sin(state.clock.elapsedTime * (isDrawing ? 3 : 1.5)) * 0.08;
       meshRef.current.scale.setScalar(scale);
       meshRef.current.rotation.z = state.clock.elapsedTime * speed;
     }
-
-    // 更新材质透明度
-    if (materialRef.current) {
-      materialRef.current.opacity = isDrawing ? 0.6 : 0.4;
-    }
   });
 
-  // 使用 useMemo 缓存几何体和材质
-  const { geometry, material } = useMemo(() => {
-    return {
-      geometry: new THREE.RingGeometry(4.5, 4.7, 40), // 从48减少到40
-      material: new THREE.MeshBasicMaterial({
-        color: "#ec4899",
-        transparent: true,
-        opacity: 0.4,
-        side: THREE.DoubleSide,
-      }),
-    };
-  }, []);
-
   return (
-    <mesh ref={meshRef} geometry={geometry} rotation={[Math.PI / 2, 0, 0]}>
-      <primitive object={material} ref={materialRef} />
+    <mesh ref={meshRef} rotation={[Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[4.5, 4.7, segments]} />
+      <meshBasicMaterial
+        color="#ec4899"
+        transparent
+        opacity={isDrawing ? 0.7 : 0.5}
+        side={THREE.DoubleSide}
+      />
     </mesh>
   );
 }
 
-// 粒子环 - 优化版（使用 useMemo 缓存几何体）
-function ParticleRing({ isDrawing }: { isDrawing: boolean }) {
+// 粒子环 - 减少粒子数量
+function ParticleRing({ isDrawing, count }: { isDrawing: boolean; count: number }) {
   const points = useRef<THREE.Points>(null);
-  const particlesCount = 400; // 进一步减少到400
 
-  // 使用 useMemo 缓存粒子位置和颜色
+  // 使用useMemo缓存位置和颜色数据
   const { positions, colors } = useMemo(() => {
-    const positions = new Float32Array(particlesCount * 3);
-    const colors = new Float32Array(particlesCount * 3);
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
 
-    for (let i = 0; i < particlesCount; i++) {
+    for (let i = 0; i < count; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(Math.random() * 2 - 1);
       const r = 5 + Math.random() * 1;
@@ -260,44 +267,47 @@ function ParticleRing({ isDrawing }: { isDrawing: boolean }) {
 
       const colorChoice = Math.floor(Math.random() * 3);
       if (colorChoice === 0) {
-        colors[i * 3] = 0.69;
-        colors[i * 3 + 1] = 0.33;
-        colors[i * 3 + 2] = 0.97;
+        colors[i * 3] = 0.69; colors[i * 3 + 1] = 0.33; colors[i * 3 + 2] = 0.97;
       } else if (colorChoice === 1) {
-        colors[i * 3] = 0.93;
-        colors[i * 3 + 1] = 0.27;
-        colors[i * 3 + 2] = 0.6;
+        colors[i * 3] = 0.93; colors[i * 3 + 1] = 0.27; colors[i * 3 + 2] = 0.6;
       } else {
-        colors[i * 3] = 0.27;
-        colors[i * 3 + 1] = 0.53;
-        colors[i * 3 + 2] = 0.97;
+        colors[i * 3] = 0.27; colors[i * 3 + 1] = 0.53; colors[i * 3 + 2] = 0.97;
       }
     }
+
     return { positions, colors };
-  }, [particlesCount]);
+  }, [count]);
 
   useFrame((state) => {
     if (points.current) {
-      const speed = isDrawing ? 0.3 : 0.1; // 进一步降低速度
+      const speed = isDrawing ? 0.4 : 0.12;
       points.current.rotation.y = state.clock.elapsedTime * speed;
-      points.current.rotation.x = state.clock.elapsedTime * 0.02;
+      points.current.rotation.x = state.clock.elapsedTime * 0.03;
     }
   });
 
-  // 使用 useMemo 缓存几何体
-  const geometry = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    return geo;
-  }, [positions, colors]);
-
   return (
-    <points ref={points} geometry={geometry}>
+    <points ref={points}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          count={count}
+          array={positions}
+          itemSize={3}
+          args={[positions, 3]}
+        />
+        <bufferAttribute
+          attach="attributes-color"
+          count={count}
+          array={colors}
+          itemSize={3}
+          args={[colors, 3]}
+        />
+      </bufferGeometry>
       <pointsMaterial
-        size={isDrawing ? 0.08 : 0.05}
+        size={isDrawing ? 0.1 : 0.06}
         transparent
-        opacity={0.8}
+        opacity={0.85}
         sizeAttenuation
         vertexColors
       />
@@ -305,52 +315,31 @@ function ParticleRing({ isDrawing }: { isDrawing: boolean }) {
   );
 }
 
-// 上升气泡效果 - 优化版（使用 useMemo 缓存）
-function RisingBubbles({ isDrawing }: { isDrawing: boolean }) {
+// 上升气泡 - 减少数量和复杂度
+function RisingBubbles({ isDrawing, count }: { isDrawing: boolean; count: number }) {
   const groupRef = useRef<THREE.Group>(null);
 
-  // 使用 useMemo 缓存气泡位置
+  // 使用useMemo缓存气泡位置
   const bubbles = useMemo(() => {
-    return Array.from({ length: 8 }, (_, i) => { // 从12减少到8
+    return Array.from({ length: count }, (_, i) => {
       const theta = Math.random() * Math.PI * 2;
       const r = Math.random() * 6;
       return {
-        position: [
-          Math.cos(theta) * r,
-          (Math.random() - 0.5) * 10,
-          Math.sin(theta) * r,
-        ] as [number, number, number],
+        position: [Math.cos(theta) * r, (Math.random() - 0.5) * 10, Math.sin(theta) * r],
       };
     });
-  }, []);
-
-  // 使用 useMemo 缓存几何体和材质
-  const { geometry, material } = useMemo(() => {
-    return {
-      geometry: new THREE.SphereGeometry(0.06, 6, 6),
-      material: new THREE.MeshBasicMaterial({
-        color: "#fbbf24",
-        transparent: true,
-        opacity: 0.6,
-      }),
-    };
-  }, []);
+  }, [count]);
 
   useFrame((state) => {
     if (groupRef.current) {
-      const speedMultiplier = isDrawing ? 1.2 : 0.6; // 进一步降低速度
+      const speedMultiplier = isDrawing ? 1.5 : 0.8;
       groupRef.current.children.forEach((child, i) => {
         const bubble = child as THREE.Mesh;
-        const speed = (0.3 + i * 0.06) * speedMultiplier;
-        bubble.position.y =
-          ((state.clock.elapsedTime * speed + i * 2) % 10) - 5;
-        const scale = 1 + Math.sin(state.clock.elapsedTime * 1.2 + i) * 0.15;
+        const speed = (0.4 + i * 0.08) * speedMultiplier;
+        bubble.position.y = ((state.clock.elapsedTime * speed + i * 2) % 10) - 5;
+        // 简化缩放动画
+        const scale = 1 + Math.sin(state.clock.elapsedTime * 1.5 + i) * 0.2;
         bubble.scale.setScalar(scale);
-
-        // 更新材质透明度
-        if (bubble.material instanceof THREE.MeshBasicMaterial) {
-          bubble.material.opacity = isDrawing ? 0.6 : 0.4;
-        }
       });
     }
   });
@@ -358,13 +347,20 @@ function RisingBubbles({ isDrawing }: { isDrawing: boolean }) {
   return (
     <group ref={groupRef}>
       {bubbles.map((bubble, i) => (
-        <mesh key={i} position={bubble.position} geometry={geometry} material={material} />
+        <mesh key={i} position={bubble.position as [number, number, number]}>
+          <sphereGeometry args={[0.08, 6, 6]} />
+          <meshBasicMaterial
+            color="#fbbf24"
+            transparent
+            opacity={isDrawing ? 0.7 : 0.5}
+          />
+        </mesh>
       ))}
     </group>
   );
 }
 
-// 倒计时进度条（使用 React hooks，不在 Canvas 内）
+// 倒计时进度条
 function CountdownProgress({ isDrawing }: { isDrawing: boolean }) {
   const [progress, setProgress] = useState(0);
   const [remaining, setRemaining] = useState(10);
@@ -430,6 +426,24 @@ function CountdownProgress({ isDrawing }: { isDrawing: boolean }) {
   );
 }
 
+// 帧率监控组件
+function FPSCounter({ fps }: { fps: number }) {
+  const getColor = () => {
+    if (fps >= 50) return 'text-green-400';
+    if (fps >= 30) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
+  return (
+    <div className="absolute bottom-4 right-4 z-50 flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2">
+      <Cpu className="h-4 w-4 text-white" />
+      <span className={`text-sm font-mono font-bold ${getColor()}`}>
+        {fps.toFixed(1)} FPS
+      </span>
+    </div>
+  );
+}
+
 interface ThreeDrawAnimationProps {
   names: string[];
   isDrawing: boolean;
@@ -437,35 +451,98 @@ interface ThreeDrawAnimationProps {
   onClose?: () => void;
 }
 
-export function ThreeDrawAnimation({
-  names,
-  isDrawing,
-  winners,
-  onClose,
-}: ThreeDrawAnimationProps) {
-  const [highlightedName, setHighlightedName] = useState("");
+export function ThreeDrawAnimation({ names, isDrawing, winners, onClose }: ThreeDrawAnimationProps) {
+  const [performanceLevel, setPerformanceLevel] = useState<'low' | 'medium' | 'high'>('medium');
+  const [manualPerformance, setManualPerformance] = useState<'low' | 'medium' | 'high' | null>(null);
+  const [fps, setFps] = useState(60);
+  const frameCount = useRef(0);
+  const lastTime = useRef(Date.now());
 
-  // 使用 useCallback 缓存回调
-  const handleHighlightChange = useCallback((index: number) => {
-    setHighlightedName(prev => {
-      if (index >= 0 && index < names.length) {
-        return names[index];
+  // 检测性能
+  useEffect(() => {
+    const detected = detectPerformance();
+    setPerformanceLevel(detected);
+    console.log('检测到的性能级别:', detected);
+  }, []);
+
+  // FPS计算
+  useFrame(() => {
+    frameCount.current++;
+    const now = Date.now();
+    if (now - lastTime.current >= 1000) {
+      setFps(frameCount.current);
+      frameCount.current = 0;
+      lastTime.current = now;
+
+      // 自动调整性能级别
+      if (!manualPerformance) {
+        if (fps < 25 && performanceLevel !== 'low') {
+          console.log('FPS过低，自动降低性能级别');
+          setPerformanceLevel('low');
+        } else if (fps > 50 && performanceLevel !== 'high') {
+          console.log('FPS良好，自动提升性能级别');
+          setPerformanceLevel('high');
+        }
       }
-      return "";
-    });
-  }, [names]);
+    }
+  });
+
+  // 使用手动设置的性能级别或自动检测的级别
+  const config = PERFORMANCE_CONFIG[manualPerformance || performanceLevel];
+
+  const [highlightedName, setHighlightedName] = useState('');
+
+  const handleHighlightChange = (index: number) => {
+    if (index >= 0 && index < names.length) {
+      setHighlightedName(names[index]);
+    } else {
+      setHighlightedName('');
+    }
+  };
 
   return (
     <div className="w-full h-full relative">
-      <Canvas
-        dpr={[1, 1.5]} // 降低 DPR 范围
-        performance={{ min: 0.4 }} // 降低最小性能阈值
-        gl={{
-          antialias: true,
-          alpha: true,
-          powerPreference: "high-performance",
-        }}
-      >
+      {/* 性能控制面板 */}
+      <div className="absolute top-4 left-4 z-50 flex gap-2">
+        <Button
+          size="sm"
+          variant={performanceLevel === 'low' ? 'default' : 'outline'}
+          onClick={() => {
+            setManualPerformance('low');
+            setPerformanceLevel('low');
+          }}
+          className="bg-green-600 hover:bg-green-700"
+        >
+          低配
+        </Button>
+        <Button
+          size="sm"
+          variant={performanceLevel === 'medium' ? 'default' : 'outline'}
+          onClick={() => {
+            setManualPerformance('medium');
+            setPerformanceLevel('medium');
+          }}
+          className="bg-yellow-600 hover:bg-yellow-700"
+        >
+          中配
+        </Button>
+        <Button
+          size="sm"
+          variant={performanceLevel === 'high' ? 'default' : 'outline'}
+          onClick={() => {
+            setManualPerformance('high');
+            setPerformanceLevel('high');
+          }}
+          className="bg-red-600 hover:bg-red-700"
+        >
+          高配
+        </Button>
+      </div>
+
+      {/* FPS显示 */}
+      <FPSCounter fps={fps} />
+
+      <Canvas dpr={[1, 2]} performance={{ min: 0.5 }}>
         <PerspectiveCamera makeDefault position={[0, 0, 12]} fov={50} />
         <OrbitControls
           enableZoom={false}
@@ -476,43 +553,40 @@ export function ThreeDrawAnimation({
         />
 
         {/* 环境光 - 减少光源数量 */}
-        <ambientLight intensity={0.4} />
-        <pointLight position={[10, 10, 10]} intensity={1.0} color="#ffffff" />
-        <pointLight
-          position={[-10, -10, -10]}
-          intensity={0.6}
-          color="#ec4899"
-        />
+        <ambientLight intensity={0.5} />
+        <pointLight position={[10, 10, 10]} intensity={1.2} color="#ffffff" />
+        <pointLight position={[-10, -10, -10]} intensity={0.8} color="#ec4899" />
 
-        {/* 星空背景 - 减少数量 */}
+        {/* 星空背景 - 使用配置的数量 */}
         <Stars
           radius={150}
           depth={60}
-          count={3000} // 从4000减少到3000
+          count={config.starsCount}
           factor={4}
           saturation={0}
           fade
-          speed={0.4} // 降低速度
+          speed={0.5}
         />
 
         {/* 名字球体 */}
         <NameSphere
           names={names}
           isDrawing={isDrawing}
+          config={config}
           onHighlightChange={handleHighlightChange}
         />
 
         {/* 内部发光球体 */}
-        <InnerGlowSphere isDrawing={isDrawing} />
+        <InnerGlowSphere isDrawing={isDrawing} segments={config.sphereSegments} />
 
         {/* 外部光环 */}
-        <OuterGlowRing isDrawing={isDrawing} />
+        <OuterGlowRing isDrawing={isDrawing} segments={config.ringSegments} />
 
         {/* 粒子环 */}
-        <ParticleRing isDrawing={isDrawing} />
+        <ParticleRing isDrawing={isDrawing} count={config.particlesCount} />
 
         {/* 上升气泡 */}
-        <RisingBubbles isDrawing={isDrawing} />
+        <RisingBubbles isDrawing={isDrawing} count={config.bubbleCount} />
       </Canvas>
 
       {/* 倒计时进度条 */}
@@ -551,10 +625,10 @@ export function ThreeDrawAnimation({
                     onClick={onClose}
                     size="lg"
                     variant="outline"
-                    className="gap-2 bg-black/50 hover:bg-black/70 backdrop-blur-xl border-2 border-white/30 hover:border-white/50 px-6 py-6 rounded-full shadow-xl text-white"
+                    className="gap-2 bg-black/50  backdrop-blur-xl border-2 border-white/30 hover:border-white/50 hover:text-white px-6 py-6 rounded-full shadow-xl"
                   >
                     <X className="h-6 w-6 text-white" />
-                      <span className="text-white">关闭</span>
+                    关闭
                   </Button>
                 </div>
               )}
