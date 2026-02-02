@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { QueryProvider } from "@/lib/api/query-client";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { Analytics } from '@/lib/performance/analytics';
 import "./globals.css";
 
 const geistSans = Geist({
@@ -34,6 +35,8 @@ export default function RootLayout({
           <QueryProvider>
             {children}
             <Toaster />
+            {/* 性能监控 */}
+            <Analytics />
           </QueryProvider>
         </ErrorBoundary>
       </body>

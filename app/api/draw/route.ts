@@ -1,58 +1,29 @@
 /**
  * 抽奖 API Route
  * POST /api/draw - 执行抽奖
+ *
+ * 使用标准化的 DTO 验证和响应格式
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { drawService } from '../../lib/services/draw-service';
-import type { DrawRequest, ApiResponse, DrawResponse } from '../../types';
+import { ResponseHelper, withErrorHandler } from '@/lib/api/response';
+import { ExecuteDrawSchema } from '@/lib/dtos';
 
-export async function POST(request: NextRequest) {
-  try {
-    const body: DrawRequest = await request.json();
-    console.log('POST /api/draw - 请求体:', body);
+export const POST = withErrorHandler(async (request: NextRequest) => {
+  // 解析并验证请求体
+  const body = await request.json();
+  const dto = ExecuteDrawSchema.parse(body); // 自动验证,不符合则抛出错误
 
-    // 参数验证
-    if (!body.prizeId) {
-      console.error('缺少奖品 ID');
-      return NextResponse.json<ApiResponse<DrawResponse>>(
-        {
-          success: false,
-          error: '缺少奖品 ID',
-        },
-        { status: 400 }
-      );
-    }
+  // 执行抽奖
+  const result = await drawService.draw({
+    prizeId: dto.prizeId,
+    count: dto.count || 1,
+  });
 
-    // 执行抽奖
-    const result = await drawService.draw(body);
-    console.log('抽奖结果:', result);
-
-    if (!result.success) {
-      console.error('抽奖失败:', result.message);
-      return NextResponse.json<ApiResponse<DrawResponse>>(
-        {
-          success: false,
-          data: result,
-          error: result.message,
-        },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json<ApiResponse<DrawResponse>>({
-      success: true,
-      data: result,
-      message: `成功抽取 ${result.winners.length} 位中奖者`,
-    });
-  } catch (error) {
-    console.error('抽奖失败:', error);
-    return NextResponse.json<ApiResponse>(
-      {
-        success: false,
-        error: '服务器错误',
-      },
-      { status: 500 }
-    );
+  if (!result.success) {
+    return ResponseHelper.error(result.message || '抽奖失败', 400);
   }
-}
+
+  return ResponseHelper.success(result, `成功抽取 ${result.winners.length} 位中奖者`);
+});

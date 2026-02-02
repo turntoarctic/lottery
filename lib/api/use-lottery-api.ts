@@ -106,6 +106,84 @@ export function useDrawPrize() {
 }
 
 /**
+ * 更新奖品
+ */
+export function useUpdatePrize() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, ...data }: { id: string } & Partial<Prize>) => {
+      const response = await fetch(`${API_BASE}/prizes/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error(`更新奖品失败: ${response.statusText}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['prizes'] });
+    },
+  });
+}
+
+/**
+ * 批量导入用户
+ */
+export function useImportUsers() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (users: Partial<User>[]) => {
+      const response = await fetch(`${API_BASE}/users/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`导入用户失败: ${response.statusText}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+  });
+}
+
+/**
+ * 更新规则
+ */
+export function useUpdateRule() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (rule: Partial<Rule>) => {
+      const response = await fetch(`${API_BASE}/rules`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rule),
+      });
+
+      if (!response.ok) {
+        throw new Error(`更新规则失败: ${response.statusText}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['rules'] });
+    },
+  });
+}
+
+/**
  * 刷新所有数据
  */
 export function useRefreshData() {
