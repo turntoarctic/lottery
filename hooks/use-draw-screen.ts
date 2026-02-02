@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { usePrizes, useUsers, useRule, useTheme, useDrawRecords, useDrawPrize } from '@/lib/api/use-lottery-api';
+import { usePrizes, useUsers, useRule, useThemes, useDrawRecords, useDrawPrize } from '@/lib/api/use-lottery-api';
 import { useLotteryUIStore } from '@/lib/store/lottery-ui-store';
 import { useDrawDataSync } from './use-draw-data-sync';
 import { useKeyboardShortcuts } from './use-keyboard-shortcuts';
@@ -15,7 +15,7 @@ export function useDrawScreen() {
   const { data: prizes = [], isLoading: prizesLoading } = usePrizes();
   const { data: users = [], isLoading: usersLoading } = useUsers();
   const { data: rule } = useRule();
-  const { data: themes = [] } = useTheme();
+  const { data: themes = [] } = useThemes();
   const { data: records = [] } = useDrawRecords();
   const drawMutation = useDrawPrize();
 
@@ -51,7 +51,7 @@ export function useDrawScreen() {
 
   const eligibleUsers = useMemo(() => {
     if (!rule) return users;
-    return rule.removeAfterWin ? users.filter((u) => !u.hasWon) : users;
+    return rule.allowRepeatWin ? users : users.filter((u) => !u.hasWon);
   }, [users, rule]);
 
   const prizeWinners = useMemo(() => {
@@ -60,7 +60,7 @@ export function useDrawScreen() {
       if (!winners[record.prizeId]) {
         winners[record.prizeId] = [];
       }
-      winners[record.prizeId].push(record.winnerId);
+      winners[record.prizeId].push(record.userName);
     });
     return winners;
   }, [records]);

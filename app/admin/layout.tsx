@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
 /**
  * 管理后台布局
  * Client Component - 包含导航和交互
  */
 
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { Gift, Users, ScrollText, Home, Settings, Palette } from 'lucide-react';
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Gift, Users, ScrollText, Home, Settings, Palette } from "lucide-react";
 
 export default function AdminLayout({
   children,
@@ -52,24 +52,25 @@ export default function AdminLayout({
                   人员管理
                 </Button>
               </Link>
-              <Link href="/admin/records">
-                <Button variant="ghost" className="w-full justify-start gap-2">
-                  <ScrollText className="h-4 w-4" />
-                  抽奖记录
-                </Button>
-              </Link>
               <Link href="/admin/rules">
                 <Button variant="ghost" className="w-full justify-start gap-2">
                   <Settings className="h-4 w-4" />
                   抽奖规则
                 </Button>
               </Link>
-              <Link href="/admin/themes">
+              <Link href="/admin/records">
+                <Button variant="ghost" className="w-full justify-start gap-2">
+                  <ScrollText className="h-4 w-4" />
+                  抽奖记录
+                </Button>
+              </Link>
+
+              {/* <Link href="/admin/themes">
                 <Button variant="ghost" className="w-full justify-start gap-2">
                   <Palette className="h-4 w-4" />
                   主题风格
                 </Button>
-              </Link>
+              </Link> */}
             </nav>
           </aside>
 

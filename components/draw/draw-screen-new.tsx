@@ -103,9 +103,10 @@ export function DrawScreenNew() {
           setShowKeyboardHelp={setShowKeyboardHelp}
           prizes={prizes}
           users={users}
-          records={records}
+          prizeWinners={prizeWinners}
           selectedPrize={selectedPrize}
           currentRoundWinners={currentRoundWinners}
+          rule={rule}
         />
       }
     />

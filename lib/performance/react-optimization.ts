@@ -2,16 +2,17 @@
  * React 性能优化工具
  */
 
-import { useMemo, useCallback, useRef, useEffect, useState, React } from 'react';
+import { useMemo, useCallback, useRef, useEffect, useState, memo } from "react";
+import type { ReactNode, ComponentType } from "react";
 
 /**
  * 防抖 Hook
  */
 export function useDebounce<T extends (...args: any[]) => any>(
   callback: T,
-  delay: number
+  delay: number,
 ): (...args: Parameters<T>) => void {
-  const timeoutRef = useRef<NodeJS.Timeout>();
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   return useCallback(
     (...args: Parameters<T>) => {
@@ -23,7 +24,7 @@ export function useDebounce<T extends (...args: any[]) => any>(
         callback(...args);
       }, delay);
     },
-    [callback, delay]
+    [callback, delay],
   );
 }
 
@@ -32,10 +33,10 @@ export function useDebounce<T extends (...args: any[]) => any>(
  */
 export function useThrottle<T extends (...args: any[]) => any>(
   callback: T,
-  delay: number
+  delay: number,
 ): (...args: Parameters<T>) => void {
   const lastRunRef = useRef<number>(0);
-  const timeoutRef = useRef<NodeJS.Timeout>();
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   return useCallback(
     (...args: Parameters<T>) => {
@@ -49,13 +50,16 @@ export function useThrottle<T extends (...args: any[]) => any>(
           clearTimeout(timeoutRef.current);
         }
 
-        timeoutRef.current = setTimeout(() => {
-          callback(...args);
-          lastRunRef.current = Date.now();
-        }, delay - (now - lastRunRef.current));
+        timeoutRef.current = setTimeout(
+          () => {
+            callback(...args);
+            lastRunRef.current = Date.now();
+          },
+          delay - (now - lastRunRef.current),
+        );
       }
     },
-    [callback, delay]
+    [callback, delay],
   );
 }
 
@@ -77,10 +81,13 @@ export function useVirtualList<T>({
 
   const { visibleItems, totalHeight, offsetY } = useMemo(() => {
     const totalHeight = items.length * itemHeight;
-    const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
+    const startIndex = Math.max(
+      0,
+      Math.floor(scrollTop / itemHeight) - overscan,
+    );
     const endIndex = Math.min(
       items.length - 1,
-      Math.ceil((scrollTop + containerHeight) / itemHeight) + overscan
+      Math.ceil((scrollTop + containerHeight) / itemHeight) + overscan,
     );
 
     return {
@@ -120,7 +127,7 @@ export function useLazyImage(src: string, threshold = 0.1) {
           observer.disconnect();
         }
       },
-      { threshold }
+      { threshold },
     );
 
     if (imgRef.current) {
@@ -147,7 +154,7 @@ export function useLazyImage(src: string, threshold = 0.1) {
  */
 export function useDeepMemo<T>(factory: () => T, deps: any[]) {
   const depsRef = useRef(deps);
-  const resultRef = useRef<T>();
+  const resultRef = useRef<T | undefined>(undefined);
 
   const hasChanged = useMemo(() => {
     return deps.some((dep, i) => {
@@ -171,7 +178,7 @@ export function useDeepMemo<T>(factory: () => T, deps: any[]) {
 export function useBatchUpdate<T>(initialState: T) {
   const [state, setState] = useState<T>(initialState);
   const pendingUpdatesRef = useRef<Partial<T>>({});
-  const timeoutRef = useRef<NodeJS.Timeout>();
+  const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const batchUpdate = useCallback((updates: Partial<T>) => {
     pendingUpdatesRef.current = {
@@ -200,8 +207,11 @@ export function useBatchUpdate<T>(initialState: T) {
  * 使用 key 和 memo 避免不必要的重新渲染
  */
 export function createOptimizedListComponent<T>(
-  Component: React.ComponentType<{ item: T; index: number }>,
-  areEqual?: (prevProps: { item: T; index: number }, nextProps: { item: T; index: number }) => boolean
+  Component: ComponentType<{ item: T; index: number }>,
+  areEqual?: (
+    prevProps: { item: T; index: number },
+    nextProps: { item: T; index: number },
+  ) => boolean,
 ) {
-  return React.memo(Component, areEqual);
+  return memo(Component, areEqual);
 }

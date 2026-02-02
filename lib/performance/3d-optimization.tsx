@@ -1,4 +1,4 @@
-// import {type THREE} from "three"
+import * as THREE from "three";
 
 /**
  * 3D 性能优化配置
@@ -41,7 +41,7 @@ export function detectDevicePerformance(): 'high' | 'medium' | 'low' {
   if (typeof window === 'undefined') return 'medium';
 
   const canvas = document.createElement('canvas');
-  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  const gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null;
 
   if (!gl) return 'low';
 

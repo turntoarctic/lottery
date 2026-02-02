@@ -2,13 +2,13 @@
  * 性能监控和 Web Vitals
  */
 
-import { Metrics } from 'web-vitals';
+import { Metric } from 'web-vitals';
 
 // 性能指标收集
-let metrics: Metrics = {};
+let metrics: Record<string, Metric> = {};
 
 // 收集性能指标
-export function reportWebVitals(metric: Metrics) {
+export function reportWebVitals(metric: Metric) {
   metrics = { ...metrics, [metric.name]: metric };
 
   // 在开发环境打印
@@ -24,7 +24,7 @@ export function reportWebVitals(metric: Metrics) {
 }
 
 // 发送到分析服务
-function sendToAnalytics(metric: Metrics) {
+function sendToAnalytics(metric: Metric) {
   // TODO: 替换为实际的分析服务
   const endpoint = '/api/analytics';
 

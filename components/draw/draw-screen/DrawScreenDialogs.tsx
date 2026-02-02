@@ -15,9 +15,10 @@ interface DrawScreenDialogsProps {
   setShowKeyboardHelp: (show: boolean) => void;
   prizes: any[];
   users: any[];
-  records: any[];
+  prizeWinners: Record<string, string[]>;
   selectedPrize: any;
   currentRoundWinners: string[];
+  rule: any;
 }
 
 /**
@@ -34,9 +35,10 @@ export function DrawScreenDialogs({
   setShowKeyboardHelp,
   prizes,
   users,
-  records,
+  prizeWinners,
   selectedPrize,
   currentRoundWinners,
+  rule,
 }: DrawScreenDialogsProps) {
   return (
     <Fragment>
@@ -50,15 +52,17 @@ export function DrawScreenDialogs({
       <WinnersDialog
         open={winnersDialogOpen}
         onOpenChange={setWinnersDialogOpen}
-        prizeWinners={records}
-        users={users}
-        prizes={prizes}
+        selectedPrize={selectedPrize}
+        currentRoundWinners={currentRoundWinners}
+        prizeWinners={prizeWinners}
       />
 
       <ConfirmDrawDialog
         open={showConfirmDialog}
         onOpenChange={setShowConfirmDialog}
-        prize={selectedPrize}
+        selectedPrize={selectedPrize}
+        rule={rule}
+        users={users}
         onConfirm={() => {/* 由父组件处理 */}}
       />
 
